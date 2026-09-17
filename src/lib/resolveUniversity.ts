@@ -12,7 +12,11 @@ interface Resolved {
 }
 
 const EDU_KEYWORDS =
-  /university|college|institute|academy|polytechnic|conservatory|school of/i;
+  /university|college|institute|academy|polytechnic|conservatory|school of|университет|институт|колледж|академия|политехник|консерватори/i;
+
+function detectLang(query: string): "ru" | "en" {
+  return /[а-яё]/i.test(query) ? "ru" : "en";
+}
 
 interface WikidataSearchHit {
   id: string;
@@ -27,14 +31,17 @@ interface WikidataSearchHit {
 // handful. Its own search ranks by label match, so a false-positive like
 // "Moscow City University" beating "Toraighyrov University" is far less
 // likely than with Wikipedia's mention-frequency full-text search.
+// Searching in the query's own language (Cyrillic -> ru) matters because a
+// Russian/Kazakh institution's label often only matches well in Russian.
 async function searchWikidataEntity(
-  query: string
+  query: string,
+  lang: "ru" | "en"
 ): Promise<{ match: WikidataSearchHit; alternatives: string[] } | null> {
   try {
     const res = await fetch(
       `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(
         query
-      )}&language=en&format=json&limit=6&origin=*`,
+      )}&language=${lang}&format=json&limit=6&origin=*`,
       { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(6000) }
     );
     if (!res.ok) return null;
@@ -80,14 +87,18 @@ async function getWikidataLabel(qid: string): Promise<string | null> {
   return json.entities?.[qid]?.labels?.en?.value ?? null;
 }
 
-// Pulls city (P131), country (P17), official website (P856) and the English
-// Wikipedia sitelink (if any — most of the long tail won't have one) from a
-// single wbgetentities call.
-async function getWikidataEntity(wikibaseId: string): Promise<{
+// Pulls city (P131), country (P17), official website (P856) and the best
+// Wikipedia sitelink (query-language first, English as fallback — most of
+// the long tail won't have either) from a single wbgetentities call.
+async function getWikidataEntity(
+  wikibaseId: string,
+  lang: "ru" | "en"
+): Promise<{
   city: string | null;
   country: string | null;
   officialWebsite: string | null;
-  enwikiTitle: string | null;
+  wikiTitle: string | null;
+  wikiLang: "ru" | "en" | null;
 }> {
   try {
     const res = await fetch(
@@ -95,7 +106,13 @@ async function getWikidataEntity(wikibaseId: string): Promise<{
       { headers: { "User-Agent": USER_AGENT } }
     );
     if (!res.ok) {
-      return { city: null, country: null, officialWebsite: null, enwikiTitle: null };
+      return {
+        city: null,
+        country: null,
+        officialWebsite: null,
+        wikiTitle: null,
+        wikiLang: null,
+      };
     }
     const json = await res.json();
     const entity = json.entities?.[wikibaseId];
@@ -114,25 +131,41 @@ async function getWikidataEntity(wikibaseId: string): Promise<{
       typeof websiteClaim?.mainsnak?.datavalue?.value === "string"
         ? websiteClaim.mainsnak.datavalue.value
         : null;
-    const enwikiTitle: string | null = entity?.sitelinks?.enwiki?.title ?? null;
+
+    const sitelinks = entity?.sitelinks ?? {};
+    const preferredTitle: string | undefined = sitelinks[`${lang}wiki`]?.title;
+    const fallbackTitle: string | undefined = sitelinks.enwiki?.title;
+    const wikiTitle = preferredTitle ?? fallbackTitle ?? null;
+    const wikiLang: "ru" | "en" | null = preferredTitle
+      ? lang
+      : fallbackTitle
+      ? "en"
+      : null;
 
     const [city, country] = await Promise.all([
       cityQid ? getWikidataLabel(cityQid) : Promise.resolve(null),
       countryQid ? getWikidataLabel(countryQid) : Promise.resolve(null),
     ]);
 
-    return { city, country, officialWebsite, enwikiTitle };
+    return { city, country, officialWebsite, wikiTitle, wikiLang };
   } catch {
-    return { city: null, country: null, officialWebsite: null, enwikiTitle: null };
+    return {
+      city: null,
+      country: null,
+      officialWebsite: null,
+      wikiTitle: null,
+      wikiLang: null,
+    };
   }
 }
 
 async function getWikipediaSummary(
-  title: string
+  title: string,
+  lang: "ru" | "en" = "en"
 ): Promise<{ extract: string | null; url: string | null }> {
   try {
     const res = await fetch(
-      `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
+      `https://${lang}.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(
         title
       )}`,
       { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(6000) }
@@ -164,10 +197,14 @@ function significantWords(text: string): string[] {
 // matching entity at all. Requires the resolved title to share a real word
 // with the query (not just "University") to avoid latching onto an
 // unrelated page that happens to mention the query in passing.
-async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
+async function resolveViaWikipediaSearch(
+  rawQuery: string,
+  lang: "ru" | "en"
+): Promise<Resolved> {
+  const suffix = lang === "ru" ? "университет" : "university";
   const searchRes = await fetch(
-    `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
-      rawQuery + " university"
+    `https://${lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
+      rawQuery + " " + suffix
     )}&format=json&srlimit=5&origin=*`,
     { headers: { "User-Agent": USER_AGENT } }
   );
@@ -176,7 +213,8 @@ async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
 
   const queryWords = significantWords(rawQuery);
   const hits = rawHits.filter((h) => {
-    if (/^list of\b|\(disambiguation\)$/i.test(h.title)) return false;
+    if (/^list of\b|\(disambiguation\)$|^список\b|\(значения\)$/i.test(h.title))
+      return false;
     if (queryWords.length === 0) return true;
     const titleLower = h.title.toLowerCase();
     return queryWords.some((w) => titleLower.includes(w));
@@ -197,7 +235,7 @@ async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
 
   const topTitle = hits[0].title;
   const candidates = hits.map((h) => h.title);
-  const { extract, url } = await getWikipediaSummary(topTitle);
+  const { extract, url } = await getWikipediaSummary(topTitle, lang);
 
   return {
     resolvedName: topTitle,
@@ -216,19 +254,20 @@ async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
 // universities have at least a stub entity even with no Wikipedia article),
 // falling back to Wikipedia full-text search only if Wikidata has nothing.
 export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
-  const wd = await searchWikidataEntity(rawQuery);
+  const lang = detectLang(rawQuery);
+  const wd = await searchWikidataEntity(rawQuery, lang);
   if (!wd) {
-    return resolveViaWikipediaSearch(rawQuery);
+    return resolveViaWikipediaSearch(rawQuery, lang);
   }
 
   const { match, alternatives } = wd;
-  const { city, country, officialWebsite, enwikiTitle } = await getWikidataEntity(
-    match.id
-  );
+  const { city, country, officialWebsite, wikiTitle, wikiLang } =
+    await getWikidataEntity(match.id, lang);
 
-  const { extract, url } = enwikiTitle
-    ? await getWikipediaSummary(enwikiTitle)
-    : { extract: null, url: null };
+  const { extract, url } =
+    wikiTitle && wikiLang
+      ? await getWikipediaSummary(wikiTitle, wikiLang)
+      : { extract: null, url: null };
 
   return {
     resolvedName: match.label,

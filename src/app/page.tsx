@@ -136,8 +136,15 @@ export default function Home() {
               <h2 className="text-2xl font-semibold text-white">
                 {profile.resolvedName}
               </h2>
-              <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300">
-                {(profile.searchTimeMs / 1000).toFixed(1)} сек
+              <span className="flex items-center gap-1.5">
+                <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-emerald-500/15 text-emerald-300">
+                  {(profile.searchTimeMs / 1000).toFixed(1)} сек
+                </span>
+                {profile.cached && (
+                  <span className="text-xs font-medium px-2.5 py-1 rounded-full bg-cyan-500/15 text-cyan-300">
+                    из кэша
+                  </span>
+                )}
               </span>
             </div>
             {profile.city && (

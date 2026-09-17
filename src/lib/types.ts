@@ -66,4 +66,5 @@ export interface UniversityProfile {
   categories: Partial<Record<Category, VerifiedImage[]>>;
   warnings: string[];
   searchTimeMs: number;
+  cached: boolean;
 }

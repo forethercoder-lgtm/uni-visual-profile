@@ -3,6 +3,8 @@ import { resolveUniversity } from "@/lib/resolveUniversity";
 import { searchAllCategories } from "@/lib/imageSearch";
 import { dedupeCandidates } from "@/lib/dedup";
 import { verifyBatch, generateDescription } from "@/lib/gemini";
+import { filterContentCandidates } from "@/lib/contentFilters";
+import { getCached, setCached } from "@/lib/cache";
 import { Category, ImageCandidate, UniversityProfile, VerifiedImage } from "@/lib/types";
 
 const ALL_CATEGORIES: Category[] = [
@@ -62,6 +64,15 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Параметр q обязателен" }, { status: 400 });
   }
 
+  const cached = getCached(q);
+  if (cached) {
+    return NextResponse.json({
+      ...cached,
+      searchTimeMs: Date.now() - start,
+      cached: true,
+    });
+  }
+
   const warnings: string[] = [];
 
   try {
@@ -76,10 +87,12 @@ export async function GET(req: NextRequest) {
       warnings.push("Не удалось найти проверенное текстовое описание университета.");
     }
 
-    const rawCandidates = await searchAllCategories(
-      resolved.resolvedName,
-      resolved.city,
-      resolved.officialWebsite
+    const rawCandidates = filterContentCandidates(
+      await searchAllCategories(
+        resolved.resolvedName,
+        resolved.city,
+        resolved.officialWebsite
+      )
     );
     console.log(
       `[timing] search: ${Date.now() - start}ms, raw candidates: ${rawCandidates.length}`
@@ -141,8 +154,10 @@ export async function GET(req: NextRequest) {
       categories,
       warnings,
       searchTimeMs: Date.now() - start,
+      cached: false,
     };
 
+    setCached(q, profile);
     return NextResponse.json(profile);
   } catch (err) {
     console.error("[route] error:", err);
