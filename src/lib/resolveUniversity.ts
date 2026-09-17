@@ -68,6 +68,18 @@ async function getWikidataFacts(wikibaseId: string): Promise<{
   }
 }
 
+const GENERIC_TITLE_WORDS = new Set([
+  "university", "college", "institute", "academy", "of", "the", "and",
+  "state", "national", "university's",
+]);
+
+function significantWords(text: string): string[] {
+  return text
+    .toLowerCase()
+    .split(/[^a-zа-яё0-9]+/i)
+    .filter((w) => w.length > 2 && !GENERIC_TITLE_WORDS.has(w));
+}
+
 // Disambiguates the university name via Wikipedia search, then pulls a short
 // factual summary plus city/country/official-website from the linked
 // Wikidata entity — city is required both for "photos of the city" and for
@@ -81,7 +93,21 @@ export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
     { headers: { "User-Agent": USER_AGENT } }
   );
   const searchJson = await searchRes.json();
-  const hits: { title: string }[] = searchJson?.query?.search ?? [];
+  const rawHits: { title: string }[] = searchJson?.query?.search ?? [];
+
+  // Full-text search surfaces "List of..."/overview articles, and pages
+  // about an entirely different institution that merely also contains the
+  // word "University" — trusting the top hit blindly can resolve to a
+  // wrong or unrelated page, which is worse than admitting we found
+  // nothing. Require the title to share a real (non-generic) word with the
+  // query, e.g. "Toraighyrov" — not just "University".
+  const queryWords = significantWords(rawQuery);
+  const hits = rawHits.filter((h) => {
+    if (/^list of\b|\(disambiguation\)$/i.test(h.title)) return false;
+    if (queryWords.length === 0) return true;
+    const titleLower = h.title.toLowerCase();
+    return queryWords.some((w) => titleLower.includes(w));
+  });
 
   if (hits.length === 0) {
     return {
