@@ -32,6 +32,44 @@ const LOADING_STEPS = [
   "Проверяем достоверность через AI…",
 ];
 
+const PRESET_QUERIES = [
+  "Nazarbayev University",
+  "Satbayev University",
+  "Massachusetts Institute of Technology",
+  "МГУ",
+];
+
+const PIPELINE_STEPS = [
+  { icon: "🔎", label: "Название" },
+  { icon: "🌐", label: "Поиск" },
+  { icon: "✅", label: "Проверка" },
+  { icon: "🗂️", label: "Категории" },
+  { icon: "📋", label: "Профиль" },
+];
+
+const FEATURE_CARDS = [
+  {
+    icon: "🤖",
+    title: "AI-верификация",
+    text: "Gemini Vision сверяет каждое фото с названием университета и городом, а не просто доверяет подписи.",
+  },
+  {
+    icon: "🛡️",
+    title: "Честная неопределённость",
+    text: "Если принадлежность фото не удаётся подтвердить, мы честно понижаем оценку — а не выдаём желаемое за действительное.",
+  },
+  {
+    icon: "🌍",
+    title: "Работает не только для звёзд рейтинга",
+    text: "Резолвинг через Wikidata + парсинг официального сайта — охват далеко за пределами десятка самых известных вузов.",
+  },
+  {
+    icon: "🔗",
+    title: "Прозрачные источники",
+    text: "Каждое фото кликабельно ведёт на первоисточник — Wikimedia Commons, Openverse или сайт университета.",
+  },
+];
+
 export default function Home() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
@@ -39,14 +77,16 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<Category | "all">("all");
 
-  async function handleSearch() {
-    if (!query.trim() || loading) return;
+  async function handleSearch(overrideQuery?: string) {
+    const q = (overrideQuery ?? query).trim();
+    if (!q || loading) return;
+    if (overrideQuery) setQuery(overrideQuery);
     setLoading(true);
     setError(null);
     setProfile(null);
     setActiveFilter("all");
     try {
-      const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+      const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Ошибка поиска");
       setProfile(json);
@@ -95,14 +135,67 @@ export default function Home() {
             onKeyDown={(e) => e.key === "Enter" && handleSearch()}
           />
           <button
-            onClick={handleSearch}
+            onClick={() => handleSearch()}
             disabled={loading}
             className="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-500 to-violet-500 text-white font-medium disabled:opacity-50 hover:brightness-110 active:scale-[0.98] transition"
           >
             {loading ? "Ищем…" : "Найти"}
           </button>
         </div>
+
+        {!profile && !loading && (
+          <div className="mt-4 flex items-center flex-wrap justify-center gap-2">
+            <span className="text-xs text-white/40 flex items-center gap-1">
+              ✨ Быстрый тест:
+            </span>
+            {PRESET_QUERIES.map((preset) => (
+              <button
+                key={preset}
+                onClick={() => handleSearch(preset)}
+                className="text-xs px-3 py-1.5 rounded-full glass text-white/70 hover:text-white hover:border-indigo-400/40 transition"
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {!profile && !loading && (
+        <div className="max-w-4xl mx-auto mb-16">
+          <div className="flex items-center justify-center flex-wrap gap-2 sm:gap-4 mb-16">
+            {PIPELINE_STEPS.map((step, i) => (
+              <div key={step.label} className="flex items-center gap-2 sm:gap-4">
+                <div className="flex flex-col items-center gap-1.5">
+                  <div className="w-11 h-11 rounded-xl glass flex items-center justify-center text-lg">
+                    {step.icon}
+                  </div>
+                  <span className="text-xs text-white/50 whitespace-nowrap">
+                    {step.label}
+                  </span>
+                </div>
+                {i < PIPELINE_STEPS.length - 1 && (
+                  <span className="text-white/20 -mt-4">→</span>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {FEATURE_CARDS.map((card) => (
+              <div key={card.title} className="glass rounded-2xl p-5">
+                <div className="text-2xl mb-2">{card.icon}</div>
+                <h3 className="text-sm font-semibold text-white mb-1">
+                  {card.title}
+                </h3>
+                <p className="text-xs text-white/50 leading-relaxed">
+                  {card.text}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {loading && (
         <div className="max-w-md mx-auto text-center space-y-3">
