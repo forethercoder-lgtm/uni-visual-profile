@@ -78,7 +78,8 @@ export async function GET(req: NextRequest) {
 
     const rawCandidates = await searchAllCategories(
       resolved.resolvedName,
-      resolved.city
+      resolved.city,
+      resolved.officialWebsite
     );
     console.log(
       `[timing] search: ${Date.now() - start}ms, raw candidates: ${rawCandidates.length}`
@@ -144,6 +145,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(profile);
   } catch (err) {
+    console.error("[route] error:", err);
     return NextResponse.json(
       {
         error: err instanceof Error ? err.message : "Неизвестная ошибка",

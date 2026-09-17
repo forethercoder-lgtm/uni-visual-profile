@@ -66,10 +66,6 @@ export default function Home() {
   return (
     <main className="flex-1 w-full px-4 py-16 sm:py-20">
       <div className="max-w-3xl mx-auto text-center mb-10">
-        <div className="inline-flex items-center gap-2 px-3 py-1 mb-5 rounded-full glass text-xs font-medium text-white/70 tracking-wide uppercase">
-          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-          LOCUS Hackathon 2026 · Кейс 01
-        </div>
         <h1 className="text-4xl sm:text-5xl font-bold tracking-tight mb-4 bg-gradient-to-br from-white via-white to-white/60 bg-clip-text text-transparent">
           Визуальный профиль
           <br />

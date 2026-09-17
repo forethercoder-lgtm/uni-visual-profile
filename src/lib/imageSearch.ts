@@ -1,4 +1,5 @@
 import { USER_AGENT } from "./http";
+import { searchOfficialSite } from "./officialSite";
 import { CATEGORY_QUERIES, Category, ImageCandidate } from "./types";
 
 const RESULTS_PER_SOURCE = 10;
@@ -115,13 +116,21 @@ const NON_CITY_CATEGORIES: Category[] = [
 
 export async function searchAllCategories(
   universityName: string,
-  city: string | null
+  city: string | null,
+  officialWebsite: string | null
 ): Promise<ImageCandidate[]> {
   const tasks: Promise<ImageCandidate[]>[] = [];
 
   // Broad base pool — just the institution name, biggest single source of hits.
   tasks.push(searchCommons(`"${universityName}"`, "campus", 20));
   tasks.push(searchOpenverse(universityName, "campus", 15));
+
+  // The official website is the fallback that scales to universities with
+  // no Commons/Openverse presence — most of the ~25,000 worldwide have a
+  // site even when nobody has ever uploaded a CC-licensed photo of them.
+  if (officialWebsite) {
+    tasks.push(searchOfficialSite(officialWebsite, "campus"));
+  }
 
   // Per-category supplemental searches (best-effort; many will return few/none).
   for (const category of NON_CITY_CATEGORIES) {

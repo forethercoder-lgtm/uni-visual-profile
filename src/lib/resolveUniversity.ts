@@ -4,6 +4,7 @@ interface Resolved {
   resolvedName: string;
   city: string | null;
   country: string | null;
+  officialWebsite: string | null;
   wikiSummary: string | null;
   wikiUrl: string | null;
   ambiguous: boolean;
@@ -12,7 +13,7 @@ interface Resolved {
 
 interface WikidataClaim {
   mainsnak?: {
-    datavalue?: { value?: { id?: string } };
+    datavalue?: { value?: { id?: string } | string };
   };
 }
 
@@ -26,43 +27,52 @@ async function getWikidataLabel(qid: string): Promise<string | null> {
   return json.entities?.[qid]?.labels?.en?.value ?? null;
 }
 
-async function getLocationFromWikidata(
-  wikibaseId: string
-): Promise<{ city: string | null; country: string | null }> {
+// Single wbgetclaims call (no property filter) pulls city (P131), country
+// (P17) and official website (P856) together instead of three round trips.
+async function getWikidataFacts(wikibaseId: string): Promise<{
+  city: string | null;
+  country: string | null;
+  officialWebsite: string | null;
+}> {
   try {
     const res = await fetch(
-      `https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${wikibaseId}&property=P131&format=json&origin=*`,
+      `https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${wikibaseId}&format=json&origin=*`,
       { headers: { "User-Agent": USER_AGENT } }
     );
-    const countryRes = await fetch(
-      `https://www.wikidata.org/w/api.php?action=wbgetclaims&entity=${wikibaseId}&property=P17&format=json&origin=*`,
-      { headers: { "User-Agent": USER_AGENT } }
-    );
-    const json = res.ok ? await res.json() : null;
-    const countryJson = countryRes.ok ? await countryRes.json() : null;
+    if (!res.ok) return { city: null, country: null, officialWebsite: null };
+    const json = await res.json();
+    const claims = json.claims ?? {};
 
-    const cityClaim: WikidataClaim | undefined = json?.claims?.P131?.[0];
-    const countryClaim: WikidataClaim | undefined =
-      countryJson?.claims?.P17?.[0];
+    const cityClaim: WikidataClaim | undefined = claims.P131?.[0];
+    const countryClaim: WikidataClaim | undefined = claims.P17?.[0];
+    const websiteClaim: WikidataClaim | undefined = claims.P856?.[0];
 
-    const cityQid = cityClaim?.mainsnak?.datavalue?.value?.id;
-    const countryQid = countryClaim?.mainsnak?.datavalue?.value?.id;
+    const cityQid = (cityClaim?.mainsnak?.datavalue?.value as { id?: string })
+      ?.id;
+    const countryQid = (
+      countryClaim?.mainsnak?.datavalue?.value as { id?: string }
+    )?.id;
+    const officialWebsite =
+      typeof websiteClaim?.mainsnak?.datavalue?.value === "string"
+        ? websiteClaim.mainsnak.datavalue.value
+        : null;
 
     const [city, country] = await Promise.all([
       cityQid ? getWikidataLabel(cityQid) : Promise.resolve(null),
       countryQid ? getWikidataLabel(countryQid) : Promise.resolve(null),
     ]);
 
-    return { city, country };
+    return { city, country, officialWebsite };
   } catch {
-    return { city: null, country: null };
+    return { city: null, country: null, officialWebsite: null };
   }
 }
 
 // Disambiguates the university name via Wikipedia search, then pulls a short
-// factual summary plus city/country from the linked Wikidata entity — city
-// is required both for "photos of the city" and for scoping image search
-// queries to the right place.
+// factual summary plus city/country/official-website from the linked
+// Wikidata entity — city is required both for "photos of the city" and for
+// scoping image search queries; the official website is the fallback image
+// source for universities with no Commons/Openverse presence.
 export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
   const searchRes = await fetch(
     `https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(
@@ -78,6 +88,7 @@ export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
       resolvedName: rawQuery,
       city: null,
       country: null,
+      officialWebsite: null,
       wikiSummary: null,
       wikiUrl: null,
       ambiguous: true,
@@ -99,6 +110,7 @@ export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
       resolvedName: topTitle,
       city: null,
       country: null,
+      officialWebsite: null,
       wikiSummary: null,
       wikiUrl: null,
       ambiguous: candidates.length > 1,
@@ -108,14 +120,15 @@ export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
   const summaryJson = await summaryRes.json();
   const wikibaseId: string | undefined = summaryJson.wikibase_item;
 
-  const { city, country } = wikibaseId
-    ? await getLocationFromWikidata(wikibaseId)
-    : { city: null, country: null };
+  const { city, country, officialWebsite } = wikibaseId
+    ? await getWikidataFacts(wikibaseId)
+    : { city: null, country: null, officialWebsite: null };
 
   return {
     resolvedName: summaryJson.title ?? topTitle,
     city,
     country,
+    officialWebsite,
     wikiSummary: summaryJson.extract ?? null,
     wikiUrl: summaryJson.content_urls?.desktop?.page ?? null,
     ambiguous: candidates.length > 1,
