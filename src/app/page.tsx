@@ -1,9 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ACTIVITY_LABELS,
   CATEGORY_LABELS,
   Category,
+  ClarifyRequest,
+  Insights,
+  Level,
   SocialLink,
   UniversityProfile,
   VerifiedImage,
@@ -62,10 +66,10 @@ const PRESET_QUERIES = [
 ];
 
 const STEPS = [
-  { n: "01", label: "Название", text: "Вводите название вуза или колледжа на русском или английском." },
+  { n: "01", label: "Название", text: "Вводите название вуза или колледжа на любом языке — даже с ошибкой или сокращением." },
   { n: "02", label: "Поиск", text: "Собираем фото из открытых архивов, с официального сайта и находим официальные соцсети." },
   { n: "03", label: "Проверка", text: "AI сверяет каждое фото с учебным заведением и убирает дубликаты." },
-  { n: "04", label: "Профиль", text: "Получаете профиль: категории, краткое описание каждого фото и источники." },
+  { n: "04", label: "Профиль", text: "Получаете профиль: фото по категориям, факультеты, активности для студентов и источники." },
 ];
 
 const TRUST = [
@@ -90,6 +94,159 @@ const TRUST = [
     text: "У каждого фото — кликабельный первоисточник: Wikimedia Commons, Openverse или сайт учебного заведения.",
   },
 ];
+
+const LEVEL_LABELS: Record<Level, string> = {
+  high: "высокая",
+  medium: "средняя",
+  low: "низкая",
+};
+const LEVEL_FILL: Record<Level, number> = { high: 3, medium: 2, low: 1 };
+
+function Meter({ label, level }: { label: string; level: Level | null }) {
+  const filled = level ? LEVEL_FILL[level] : 0;
+  return (
+    <div>
+      <div className="flex items-baseline justify-between text-xs mb-1">
+        <span className="text-muted">{label}</span>
+        <span className={level ? "text-brand font-medium" : "text-muted/70"}>
+          {level ? LEVEL_LABELS[level] : "нет данных"}
+        </span>
+      </div>
+      <div className="flex gap-1" aria-hidden="true">
+        {[1, 2, 3].map((i) => (
+          <span
+            key={i}
+            className="h-1.5 flex-1 rounded-full"
+            style={{ background: i <= filled ? "var(--brand)" : "var(--line)" }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EvidenceBadge({ evidence }: { evidence: "source" | "ai_estimate" }) {
+  return evidence === "source" ? (
+    <span className="shrink-0 whitespace-nowrap text-[10px] px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-800 border border-emerald-200">
+      по источникам
+    </span>
+  ) : (
+    <span className="shrink-0 whitespace-nowrap text-[10px] px-2 py-0.5 rounded-full bg-gold-soft text-amber-900 border border-gold/40">
+      оценка ИИ
+    </span>
+  );
+}
+
+function InsightsBlock({ insights }: { insights: Insights }) {
+  const { faculties, activities, overallLoad } = insights;
+  return (
+    <>
+      {(faculties.length > 0 || overallLoad) && (
+        <section className="mb-12">
+          <h3 className="font-serif text-2xl font-semibold text-brand mb-1">
+            Факультеты: популярность и загруженность
+          </h3>
+          <span className="rule mb-3" />
+          <p className="text-xs text-muted mb-5 max-w-3xl leading-relaxed">
+            Популярность — спрос среди абитуриентов. Загруженность — сколько студентов
+            приходится на факультет и насколько напряжённая учебная нагрузка.
+            Уровни — оценка ИИ по открытым источникам, а не официальная статистика.
+          </p>
+
+          {(overallLoad || insights.studentCount) && (
+            <div className="card rounded-xl p-4 mb-5 flex flex-wrap items-center gap-x-8 gap-y-3">
+              {insights.studentCount && (
+                <div>
+                  <div className="font-serif text-2xl font-semibold text-brand">
+                    ≈ {insights.studentCount.toLocaleString("ru-RU")}
+                  </div>
+                  <div className="text-xs text-muted">студентов (Wikidata)</div>
+                </div>
+              )}
+              {overallLoad && (
+                <div className="flex-1 min-w-[220px]">
+                  <Meter label="Общая загруженность вуза" level={overallLoad.level} />
+                  {overallLoad.note && (
+                    <p className="text-xs text-muted mt-2 leading-relaxed">{overallLoad.note}</p>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {faculties.map((f) => (
+              <article key={f.name} className="card rounded-xl p-5 flex flex-col gap-3">
+                <div className="flex items-start justify-between gap-3">
+                  <h4 className="font-serif text-lg font-semibold text-brand leading-snug">
+                    {f.name}
+                  </h4>
+                  <EvidenceBadge evidence={f.evidence} />
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <Meter label="Популярность" level={f.popularity} />
+                  <Meter label="Загруженность" level={f.load} />
+                </div>
+                {f.students && (
+                  <p className="text-xs text-muted">
+                    ≈ {f.students.toLocaleString("ru-RU")} студентов
+                  </p>
+                )}
+                {f.note && <p className="text-sm text-ink/80 leading-relaxed">{f.note}</p>}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {activities.length > 0 && (
+        <section className="mb-12">
+          <h3 className="font-serif text-2xl font-semibold text-brand mb-1">
+            Активности для студентов
+          </h3>
+          <span className="rule mb-6" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {activities.map((a) => (
+              <article key={a.title} className="card rounded-xl p-5 flex flex-col gap-2">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] uppercase tracking-wider text-gold font-semibold">
+                    {ACTIVITY_LABELS[a.kind]}
+                  </span>
+                  <EvidenceBadge evidence={a.evidence} />
+                </div>
+                <h4 className="font-serif text-lg font-semibold text-brand leading-snug">
+                  {a.title}
+                </h4>
+                {a.description && (
+                  <p className="text-sm text-ink/80 leading-relaxed">{a.description}</p>
+                )}
+              </article>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {insights.sources.length > 0 && (
+        <p className="text-xs text-muted mb-12 leading-relaxed">
+          Источники:{" "}
+          {insights.sources.map((src, i) => (
+            <span key={src.url}>
+              {i > 0 && " · "}
+              <a
+                href={src.url}
+                target="_blank"
+                rel="noreferrer"
+                className="underline decoration-gold/60 hover:text-brand"
+              >
+                {src.label}
+              </a>
+            </span>
+          ))}
+        </p>
+      )}
+    </>
+  );
+}
 
 function Crest({ size = 40, tone = "brand" }: { size?: number; tone?: "brand" | "light" }) {
   const stroke = tone === "brand" ? "var(--brand)" : "#f7f2e7";
@@ -151,6 +308,7 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
   const [profile, setProfile] = useState<UniversityProfile | null>(null);
+  const [clarify, setClarify] = useState<ClarifyRequest | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeFilter, setActiveFilter] = useState<Category | "all">("all");
   const [selectedPhoto, setSelectedPhoto] = useState<VerifiedImage | null>(null);
@@ -162,13 +320,15 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setProfile(null);
+    setClarify(null);
     setActiveFilter("all");
     window.scrollTo({ top: 0, behavior: "smooth" });
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "Ошибка поиска");
-      setProfile(json);
+      if (json.clarify) setClarify(json.clarify);
+      else setProfile(json);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Неизвестная ошибка");
     } finally {
@@ -176,8 +336,18 @@ export default function Home() {
     }
   }
 
+  // Lets a search be opened from a link: /?q=Nazarbayev+University
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("q");
+    if (!q) return;
+    const timer = setTimeout(() => void handleSearch(q), 0);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   function resetSearch() {
     setProfile(null);
+    setClarify(null);
     setError(null);
     setQuery("");
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -260,12 +430,35 @@ export default function Home() {
               </h2>
               <span className="rule mx-auto mb-6" />
               <p className="text-muted text-lg max-w-xl mx-auto mb-10">
-                Введите название — мы найдём, проверим и разложим по категориям
-                реальные фото кампуса, общежитий и города, а ещё покажем
-                официальные аккаунты вуза в Instagram и других соцсетях.
+                Введите название — даже с ошибкой или сокращением. Мы найдём и проверим
+                реальные фото кампуса, покажем факультеты, их популярность и загруженность,
+                студенческие активности и официальные аккаунты вуза в Instagram.
               </p>
               {searchBox}
-              {showHome && (
+              {clarify && !loading && (
+                <div className="card rounded-2xl p-5 mt-6 max-w-2xl mx-auto text-left fade-in">
+                  <p className="font-serif text-lg text-brand mb-1">Нужно уточнить</p>
+                  <p className="text-sm text-ink/80 leading-relaxed mb-4">{clarify.question}</p>
+                  {clarify.options.length > 0 ? (
+                    <div className="flex flex-wrap gap-2">
+                      {clarify.options.map((opt) => (
+                        <button
+                          key={opt}
+                          onClick={() => handleSearch(opt)}
+                          className="btn-outline px-4 py-1.5 rounded-full text-sm"
+                        >
+                          {opt}
+                        </button>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted">
+                      Впишите полное название, город или страну в строку выше и нажмите «Найти».
+                    </p>
+                  )}
+                </div>
+              )}
+              {showHome && !clarify && (
                 <div className="mt-5 flex items-center flex-wrap justify-center gap-2">
                   <span className="text-xs text-muted">Быстрый тест:</span>
                   {PRESET_QUERIES.map((preset) => (
@@ -402,7 +595,7 @@ export default function Home() {
             </section>
 
             <div className="max-w-6xl mx-auto px-4 py-12">
-              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10">
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-10 items-start">
                 <div className="card rounded-xl p-6 lg:col-span-2">
                   <h3 className="font-serif text-xl font-semibold text-brand mb-1">О вузе</h3>
                   <span className="rule mb-4" />
@@ -468,6 +661,8 @@ export default function Home() {
                   ))}
                 </div>
               )}
+
+              {profile.insights && <InsightsBlock insights={profile.insights} />}
 
               <div className="flex flex-wrap gap-2 mb-10">
                 {(["all", ...FILTERS.filter((f) => profile.categories[f])] as (Category | "all")[]).map(

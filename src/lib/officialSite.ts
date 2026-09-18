@@ -155,3 +155,88 @@ export async function fetchOfficialSiteSummary(
     return null;
   }
 }
+
+function htmlToText(html: string): string {
+  return decodeHtmlEntities(
+    html
+      .replace(/<(script|style|noscript|svg|nav|footer)\b[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const FACULTY_LINK_RE =
+  /faculty|faculties|schools?\b|department|academics|programs?\b|colleges?\b|факультет|кафедр|школ[аы]|программ|институт|fakült|fakultät|facultad|faculté/i;
+const STUDENT_LINK_RE =
+  /student|campus|clubs?\b|activit|societ|organi[sz]ation|life|extracurricular|студент|клуб|внеучеб|жизнь|кампус|студен/i;
+const SKIP_HREF_RE = /\.(pdf|docx?|xlsx?|pptx?|zip|rar|jpe?g|png|gif|svg|mp4)(\?|$)|^(mailto|tel|javascript):|^#/i;
+const ANCHOR_RE = /<a\b[^>]*?href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+
+export interface SitePage {
+  url: string;
+  text: string;
+}
+
+// Reads a few sub-pages of the university's own site that are most likely to
+// describe faculties/schools and student life (found by link text/path on the
+// homepage), so structured facts come from the institution itself instead of
+// the model's memory. Same-host links only; small text budget per page.
+export async function fetchOfficialSitePages(
+  websiteUrl: string,
+  perKind = 2
+): Promise<SitePage[]> {
+  const page = await fetchHomepage(websiteUrl);
+  if (!page) return [];
+
+  const base = new URL(page.finalUrl);
+  const host = base.hostname.replace(/^www\./, "");
+  const faculty: string[] = [];
+  const student: string[] = [];
+  const seen = new Set<string>([base.toString()]);
+
+  for (const m of page.html.matchAll(ANCHOR_RE)) {
+    const href = m[1].trim();
+    if (SKIP_HREF_RE.test(href)) continue;
+    let abs: URL;
+    try {
+      abs = new URL(href, base);
+    } catch {
+      continue;
+    }
+    if (abs.hostname.replace(/^www\./, "") !== host) continue;
+    abs.hash = "";
+    const key = abs.toString();
+    if (seen.has(key)) continue;
+
+    const label = htmlToText(m[2]).slice(0, 80);
+    const probe = `${label} ${abs.pathname}`;
+    if (FACULTY_LINK_RE.test(probe) && faculty.length < perKind) {
+      faculty.push(key);
+      seen.add(key);
+    } else if (STUDENT_LINK_RE.test(probe) && student.length < perKind) {
+      student.push(key);
+      seen.add(key);
+    }
+    if (faculty.length >= perKind && student.length >= perKind) break;
+  }
+
+  const fetched = await Promise.all(
+    [...faculty, ...student].map(async (url): Promise<SitePage | null> => {
+      try {
+        const res = await fetch(url, {
+          headers: { "User-Agent": USER_AGENT },
+          signal: AbortSignal.timeout(5000),
+          redirect: "follow",
+        });
+        if (!res.ok) return null;
+        if (!(res.headers.get("content-type") || "").includes("html")) return null;
+        const text = htmlToText(await res.text()).slice(0, 3500);
+        return text.length > 200 ? { url, text } : null;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return fetched.filter((p): p is SitePage => p !== null);
+}

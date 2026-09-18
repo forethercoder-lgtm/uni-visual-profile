@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resolveUniversity } from "@/lib/resolveUniversity";
+import {
+  resolveViaWikidata,
+  resolveViaWikipediaSearch,
+  Resolved,
+} from "@/lib/resolveUniversity";
+import { buildInsights, interpretQuery } from "@/lib/aiInsights";
 import { searchAllCategories } from "@/lib/imageSearch";
 import { dedupeCandidates } from "@/lib/dedup";
 import { verifyBatch, generateDescription } from "@/lib/gemini";
@@ -79,7 +84,57 @@ export async function GET(req: NextRequest) {
   const warnings: string[] = [];
 
   try {
-    const resolved = await resolveUniversity(q);
+    // 1) Exact/known name via Wikidata. 2) If nothing matches (typo,
+    // abbreviation, transliteration), let the AI interpret the name and
+    // re-validate its answer against Wikidata. 3) If the AI isn't sure, ask
+    // the user rather than guessing.
+    let resolved: Resolved | null = await resolveViaWikidata(q);
+
+    if (!resolved) {
+      const ai = await interpretQuery(q);
+
+      if (ai?.status === "confident" && ai.name) {
+        resolved = await resolveViaWikidata(ai.name);
+        if (!resolved) {
+          const viaWiki = await resolveViaWikipediaSearch(ai.name);
+          if (viaWiki.wikiTitle) resolved = viaWiki;
+        }
+        if (resolved) {
+          warnings.push(
+            `Название «${q}» распознано как «${resolved.resolvedName}». Если вы имели в виду другое заведение — уточните запрос.`
+          );
+        }
+      }
+
+      if (!resolved && ai && ai.status !== "confident") {
+        return NextResponse.json({
+          clarify: {
+            question:
+              ai.question ||
+              "Не удалось точно определить заведение. Уточните полное название, город или страну.",
+            options: ai.alternatives,
+          },
+          searchTimeMs: Date.now() - start,
+        });
+      }
+
+      if (!resolved) {
+        const viaWiki = await resolveViaWikipediaSearch(q);
+        if (!viaWiki.wikiTitle && !ai) {
+          resolved = viaWiki;
+        } else if (!viaWiki.wikiTitle) {
+          return NextResponse.json({
+            clarify: {
+              question: `Не нашёл заведение «${q}» в открытых базах. Уточните полное название, город или страну.`,
+              options: ai?.alternatives ?? [],
+            },
+            searchTimeMs: Date.now() - start,
+          });
+        } else {
+          resolved = viaWiki;
+        }
+      }
+    }
     console.log(`[timing] resolve: ${Date.now() - start}ms`);
     if (resolved.ambiguous && resolved.candidates.length > 1) {
       warnings.push(
@@ -95,6 +150,10 @@ export async function GET(req: NextRequest) {
         ? fetchOfficialSiteSocials(resolved.officialWebsite)
         : Promise.resolve([])
     ).then((fromSite) => mergeSocials(fromSite, resolved.socials));
+
+    // Faculties/activities run alongside the photo pipeline; a slow or failed
+    // AI call must never block the photos, so it is awaited last and optional.
+    const insightsPromise = buildInsights(resolved).catch(() => null);
 
     const rawCandidates = filterContentCandidates(
       await searchAllCategories(
@@ -161,6 +220,12 @@ export async function GET(req: NextRequest) {
     }
 
     const description = await descriptionPromise;
+    const insights = await insightsPromise;
+    if (!insights) {
+      warnings.push(
+        "Данные о факультетах и студенческих активностях получить не удалось."
+      );
+    }
     if (!resolved.wikiSummary && !(await officialSiteSummaryPromise)) {
       warnings.push("Не удалось найти проверенное текстовое описание университета.");
     }
@@ -173,6 +238,7 @@ export async function GET(req: NextRequest) {
       website: resolved.officialWebsite,
       wikiUrl: resolved.wikiUrl,
       socials: await socialsPromise,
+      insights,
       description,
       categories,
       warnings,

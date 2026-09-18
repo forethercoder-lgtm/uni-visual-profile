@@ -2,7 +2,7 @@ import { USER_AGENT } from "./http";
 import { socialsFromWikidataClaims } from "./socials";
 import { SocialLink } from "./types";
 
-interface Resolved {
+export interface Resolved {
   resolvedName: string;
   // English label when it differs from resolvedName - Commons/Openverse
   // captions are mostly English, so it doubles the image-search recall for
@@ -14,6 +14,9 @@ interface Resolved {
   socials: SocialLink[];
   wikiSummary: string | null;
   wikiUrl: string | null;
+  wikiTitle: string | null;
+  wikiLang: string | null;
+  studentCount: number | null;
   ambiguous: boolean;
   candidates: string[];
 }
@@ -107,7 +110,7 @@ async function searchWikidataInLang(
     const res = await fetch(
       `https://www.wikidata.org/w/api.php?action=wbsearchentities&search=${encodeURIComponent(
         query
-      )}&language=${lang}&uselang=${lang}&format=json&limit=6&origin=*`,
+      )}&language=${lang}&uselang=${lang}&format=json&limit=10&origin=*`,
       { headers: { "User-Agent": USER_AGENT }, signal: AbortSignal.timeout(6000) }
     );
     if (!res.ok) return [];
@@ -269,13 +272,13 @@ async function searchWikidataEntity(
 
   if (pool.length === 0) return null;
 
-  const top = pool.slice(0, 5);
+  const top = pool.slice(0, 8);
   const counts = await sitelinkCounts(top.map((s) => s.hit.id));
   for (const s of top) {
     s.score += Math.min(counts.get(s.hit.id) ?? 0, 150) / 25;
   }
   top.sort((a, b) => b.score - a.score);
-  const ranked = [...top, ...pool.slice(5)];
+  const ranked = [...top, ...pool.slice(8)];
 
   const match = ranked[0].hit;
 
@@ -333,6 +336,27 @@ function pickSitelink(
   return null;
 }
 
+// P2196 (students count) usually has several dated values; take the newest
+// (by point-in-time qualifier P585, else the last listed).
+function latestQuantity(
+  claims:
+    | {
+        mainsnak?: { datavalue?: { value?: { amount?: string } } };
+        qualifiers?: { P585?: { datavalue?: { value?: { time?: string } } }[] };
+      }[]
+    | undefined
+): number | null {
+  if (!claims?.length) return null;
+  let best: { amount: number; time: string } | null = null;
+  for (const c of claims) {
+    const amount = Number(c.mainsnak?.datavalue?.value?.amount);
+    if (!Number.isFinite(amount) || amount <= 0) continue;
+    const time = c.qualifiers?.P585?.[0]?.datavalue?.value?.time ?? "";
+    if (!best || time >= best.time) best = { amount, time };
+  }
+  return best ? Math.round(best.amount) : null;
+}
+
 interface WikidataEntityData {
   city: string | null;
   country: string | null;
@@ -343,6 +367,7 @@ interface WikidataEntityData {
   primaryName: string | null;
   wikiTitle: string | null;
   wikiLang: string | null;
+  studentCount: number | null;
 }
 
 const EMPTY_ENTITY: WikidataEntityData = {
@@ -354,6 +379,7 @@ const EMPTY_ENTITY: WikidataEntityData = {
   primaryName: null,
   wikiTitle: null,
   wikiLang: null,
+  studentCount: null,
 };
 
 // Pulls city, country, official website, social accounts, English label and
@@ -403,6 +429,7 @@ async function getWikidataEntity(
       primaryName: entity?.labels?.[primaryLang]?.value ?? null,
       wikiTitle: wiki?.title ?? null,
       wikiLang: wiki?.lang ?? null,
+      studentCount: latestQuantity(claims.P2196),
     };
   } catch {
     return EMPTY_ENTITY;
@@ -449,7 +476,7 @@ function significantWords(text: string): string[] {
 // matching entity at all. Requires the resolved title to share a real word
 // with the query (not just "University") to avoid latching onto an
 // unrelated page that happens to mention the query in passing.
-async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
+export async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
   const lang = detectScript(rawQuery) === "cyrillic" ? "ru" : "en";
   const suffix = lang === "ru" ? "университет" : "university";
   const empty: Resolved = {
@@ -461,6 +488,9 @@ async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
     socials: [],
     wikiSummary: null,
     wikiUrl: null,
+    wikiTitle: null,
+    wikiLang: null,
+    studentCount: null,
     ambiguous: true,
     candidates: [],
   };
@@ -494,6 +524,8 @@ async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
       resolvedName: topTitle,
       wikiSummary: extract,
       wikiUrl: url,
+      wikiTitle: topTitle,
+      wikiLang: lang,
       ambiguous: candidates.length > 1,
       candidates,
     };
@@ -507,11 +539,9 @@ async function resolveViaWikipediaSearch(rawQuery: string): Promise<Resolved> {
 // coverage - most institutions have at least a stub entity even with no
 // Wikipedia article), falling back to Wikipedia full-text search only if
 // Wikidata has nothing.
-export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
+export async function resolveViaWikidata(rawQuery: string): Promise<Resolved | null> {
   const wd = await searchWikidataEntity(rawQuery);
-  if (!wd) {
-    return resolveViaWikipediaSearch(rawQuery);
-  }
+  if (!wd) return null;
 
   const { match, alternatives } = wd;
   const primaryLang = LANGS_BY_SCRIPT[detectScript(rawQuery)][0];
@@ -540,6 +570,9 @@ export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
     socials: entity.socials,
     wikiSummary: extract ?? match.description ?? null,
     wikiUrl: url,
+    wikiTitle: entity.wikiTitle,
+    wikiLang: entity.wikiLang,
+    studentCount: entity.studentCount,
     ambiguous: alternatives.length > 0,
     candidates: [match.label, ...alternatives],
   };

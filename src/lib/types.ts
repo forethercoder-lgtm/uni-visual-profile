@@ -77,6 +77,60 @@ export interface SocialLink {
   source: "official_site" | "wikidata";
 }
 
+export type Level = "high" | "medium" | "low";
+
+// "source" = stated in a fetched page (Wikipedia / the university's own site);
+// "ai_estimate" = the model's general knowledge, shown with a warning badge.
+export type Evidence = "source" | "ai_estimate";
+
+export interface Faculty {
+  name: string;
+  popularity: Level | null;
+  load: Level | null;
+  students: number | null;
+  note: string;
+  evidence: Evidence;
+}
+
+export type ActivityKind =
+  | "club"
+  | "event"
+  | "sport"
+  | "volunteering"
+  | "culture"
+  | "science"
+  | "other";
+
+export interface Activity {
+  title: string;
+  kind: ActivityKind;
+  description: string;
+  evidence: Evidence;
+}
+
+export interface Insights {
+  faculties: Faculty[];
+  activities: Activity[];
+  overallLoad: { level: Level | null; note: string } | null;
+  studentCount: number | null;
+  sources: { label: string; url: string }[];
+}
+
+export const ACTIVITY_LABELS: Record<ActivityKind, string> = {
+  club: "Клуб",
+  event: "Мероприятие",
+  sport: "Спорт",
+  volunteering: "Волонтёрство",
+  culture: "Культура",
+  science: "Наука",
+  other: "Активность",
+};
+
+export interface ClarifyRequest {
+  question: string;
+  options: string[];
+}
+
 export interface UniversityProfile {
   query: string;
   resolvedName: string;
@@ -85,6 +139,7 @@ export interface UniversityProfile {
   website: string | null;
   wikiUrl: string | null;
   socials: SocialLink[];
+  insights: Insights | null;
   description: string;
   categories: Partial<Record<Category, VerifiedImage[]>>;
   warnings: string[];

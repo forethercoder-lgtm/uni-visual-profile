@@ -244,3 +244,45 @@ function extractJsonArray(text: string): VerifyResult[] | null {
     return null;
   }
 }
+
+function stripFences(text: string): string {
+  return text.replace(/^\s*```(?:json)?\s*/i, "").replace(/\s*```\s*$/, "").trim();
+}
+
+// Single JSON-returning text call used by the name-interpretation and the
+// faculty/activity extraction steps. Returns null on any failure so callers
+// can degrade gracefully instead of failing the whole search.
+export async function geminiJson<T>(
+  prompt: string,
+  timeoutMs = 25000
+): Promise<T | null> {
+  try {
+    const apiKey = requireApiKey();
+    const model = process.env.GEMINI_TEXT_MODEL || DEFAULT_MODEL;
+    const res = await fetch(
+      `${GEMINI_BASE_URL}/${model}:generateContent?key=${apiKey}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        signal: AbortSignal.timeout(timeoutMs),
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            temperature: 0.2,
+            responseMimeType: "application/json",
+          },
+        }),
+      }
+    );
+    if (!res.ok) {
+      console.error(`[gemini] json HTTP ${res.status}`);
+      return null;
+    }
+    const json = await res.json();
+    const text: string = json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
+    return JSON.parse(stripFences(text)) as T;
+  } catch (err) {
+    console.error(`[gemini] json failed: ${err instanceof Error ? err.message : err}`);
+    return null;
+  }
+}
