@@ -117,13 +117,20 @@ const NON_CITY_CATEGORIES: Category[] = [
 export async function searchAllCategories(
   universityName: string,
   city: string | null,
-  officialWebsite: string | null
+  officialWebsite: string | null,
+  altName: string | null = null
 ): Promise<ImageCandidate[]> {
   const tasks: Promise<ImageCandidate[]>[] = [];
 
   // Broad base pool — just the institution name, biggest single source of hits.
   tasks.push(searchCommons(`"${universityName}"`, "campus", 20));
   tasks.push(searchOpenverse(universityName, "campus", 15));
+  // Same institution under its other-language name (e.g. English label of a
+  // native-script name) - Commons/Openverse captions are mostly English.
+  if (altName) {
+    tasks.push(searchCommons(`"${altName}"`, "campus", 20));
+    tasks.push(searchOpenverse(altName, "campus", 15));
+  }
 
   // The official website is the fallback that scales to universities with
   // no Commons/Openverse presence — most of the ~25,000 worldwide have a

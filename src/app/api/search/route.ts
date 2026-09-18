@@ -66,7 +66,8 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Параметр q обязателен" }, { status: 400 });
   }
 
-  const cached = getCached(q);
+  const refresh = req.nextUrl.searchParams.has("refresh");
+  const cached = refresh ? null : getCached(q);
   if (cached) {
     return NextResponse.json({
       ...cached,
@@ -99,7 +100,8 @@ export async function GET(req: NextRequest) {
       await searchAllCategories(
         resolved.resolvedName,
         resolved.city,
-        resolved.officialWebsite
+        resolved.officialWebsite,
+        resolved.altName
       )
     );
     console.log(
