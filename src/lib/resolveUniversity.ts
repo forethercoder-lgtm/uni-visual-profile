@@ -1,10 +1,13 @@
 import { USER_AGENT } from "./http";
+import { socialsFromWikidataClaims } from "./socials";
+import { SocialLink } from "./types";
 
 interface Resolved {
   resolvedName: string;
   city: string | null;
   country: string | null;
   officialWebsite: string | null;
+  socials: SocialLink[];
   wikiSummary: string | null;
   wikiUrl: string | null;
   ambiguous: boolean;
@@ -97,6 +100,7 @@ async function getWikidataEntity(
   city: string | null;
   country: string | null;
   officialWebsite: string | null;
+  socials: SocialLink[];
   wikiTitle: string | null;
   wikiLang: "ru" | "en" | null;
 }> {
@@ -110,6 +114,7 @@ async function getWikidataEntity(
         city: null,
         country: null,
         officialWebsite: null,
+        socials: [],
         wikiTitle: null,
         wikiLang: null,
       };
@@ -147,12 +152,20 @@ async function getWikidataEntity(
       countryQid ? getWikidataLabel(countryQid) : Promise.resolve(null),
     ]);
 
-    return { city, country, officialWebsite, wikiTitle, wikiLang };
+    return {
+      city,
+      country,
+      officialWebsite,
+      socials: socialsFromWikidataClaims(claims),
+      wikiTitle,
+      wikiLang,
+    };
   } catch {
     return {
       city: null,
       country: null,
       officialWebsite: null,
+      socials: [],
       wikiTitle: null,
       wikiLang: null,
     };
@@ -226,6 +239,7 @@ async function resolveViaWikipediaSearch(
       city: null,
       country: null,
       officialWebsite: null,
+      socials: [],
       wikiSummary: null,
       wikiUrl: null,
       ambiguous: true,
@@ -242,6 +256,7 @@ async function resolveViaWikipediaSearch(
     city: null,
     country: null,
     officialWebsite: null,
+    socials: [],
     wikiSummary: extract,
     wikiUrl: url,
     ambiguous: candidates.length > 1,
@@ -261,7 +276,7 @@ export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
   }
 
   const { match, alternatives } = wd;
-  const { city, country, officialWebsite, wikiTitle, wikiLang } =
+  const { city, country, officialWebsite, socials, wikiTitle, wikiLang } =
     await getWikidataEntity(match.id, lang);
 
   const { extract, url } =
@@ -274,6 +289,7 @@ export async function resolveUniversity(rawQuery: string): Promise<Resolved> {
     city,
     country,
     officialWebsite,
+    socials,
     wikiSummary: extract ?? match.description ?? null,
     wikiUrl: url,
     ambiguous: alternatives.length > 0,

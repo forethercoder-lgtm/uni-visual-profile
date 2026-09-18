@@ -1,5 +1,6 @@
 import { USER_AGENT } from "./http";
-import { Category, ImageCandidate } from "./types";
+import { Category, ImageCandidate, SocialLink } from "./types";
+import { extractSocialsFromHtml } from "./socials";
 
 const SKIP_FILENAME_RE = /(logo|icon|favicon|sprite|pixel|spacer|placeholder|avatar)/i;
 const MAX_IMAGES = 15;
@@ -25,22 +26,57 @@ const ALT_RE = /\balt=["']([^"']*)["']/i;
 // the homepage (arbitrary site structures make deeper crawling unreliable
 // within the time budget), and Gemini verification still has the final say
 // on whether an extracted image is actually a relevant campus photo.
+interface Homepage {
+  html: string;
+  finalUrl: string;
+}
+
+// The photo search, the meta-description summary and the social-link scan all
+// need the same homepage - fetch it once per request burst, not three times.
+const homepageCache = new Map<
+  string,
+  { at: number; promise: Promise<Homepage | null> }
+>();
+const HOMEPAGE_TTL_MS = 60_000;
+
+function fetchHomepage(websiteUrl: string): Promise<Homepage | null> {
+  const hit = homepageCache.get(websiteUrl);
+  if (hit && Date.now() - hit.at < HOMEPAGE_TTL_MS) return hit.promise;
+
+  const promise = (async (): Promise<Homepage | null> => {
+    try {
+      const res = await fetch(websiteUrl, {
+        headers: { "User-Agent": USER_AGENT },
+        signal: AbortSignal.timeout(7000),
+        redirect: "follow",
+      });
+      if (!res.ok) return null;
+      if (!(res.headers.get("content-type") || "").includes("html")) return null;
+      return { html: await res.text(), finalUrl: res.url };
+    } catch {
+      return null;
+    }
+  })();
+  homepageCache.set(websiteUrl, { at: Date.now(), promise });
+  return promise;
+}
+
+export async function fetchOfficialSiteSocials(
+  websiteUrl: string
+): Promise<SocialLink[]> {
+  const page = await fetchHomepage(websiteUrl);
+  return page ? extractSocialsFromHtml(page.html) : [];
+}
+
 export async function searchOfficialSite(
   websiteUrl: string,
   category: Category = "campus"
 ): Promise<ImageCandidate[]> {
   try {
-    const res = await fetch(websiteUrl, {
-      headers: { "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(7000),
-      redirect: "follow",
-    });
-    if (!res.ok) return [];
-    const contentType = res.headers.get("content-type") || "";
-    if (!contentType.includes("html")) return [];
-
-    const html = await res.text();
-    const base = new URL(res.url);
+    const page = await fetchHomepage(websiteUrl);
+    if (!page) return [];
+    const html = page.html;
+    const base = new URL(page.finalUrl);
 
     const seen = new Set<string>();
     const candidates: ImageCandidate[] = [];
@@ -105,16 +141,9 @@ export async function fetchOfficialSiteSummary(
   websiteUrl: string
 ): Promise<string | null> {
   try {
-    const res = await fetch(websiteUrl, {
-      headers: { "User-Agent": USER_AGENT },
-      signal: AbortSignal.timeout(6000),
-      redirect: "follow",
-    });
-    if (!res.ok) return null;
-    const contentType = res.headers.get("content-type") || "";
-    if (!contentType.includes("html")) return null;
-
-    const html = await res.text();
+    const page = await fetchHomepage(websiteUrl);
+    if (!page) return null;
+    const html = page.html;
     for (const re of META_DESC_RE) {
       const match = html.match(re)?.[1];
       if (match && match.trim().length > 20) {

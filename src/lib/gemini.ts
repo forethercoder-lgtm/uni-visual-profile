@@ -29,6 +29,7 @@ interface VerifyResult {
   category: string;
   confidence: number;
   note: string;
+  caption?: string;
 }
 
 async function fetchImageAsBase64(
@@ -87,7 +88,7 @@ async function verifyImageBatch(
 There are ${included.length} images below, labeled "Image 0" through "Image ${
     included.length - 1
   }" in order.
-Respond ONLY with a compact JSON array of ${included.length} objects, one per image, in the same order: [{"index": 0, "relevant": boolean, "category": "one of the categories above", "confidence": number between 0 and 1, "note": "short reason in Russian"}, ...].
+Respond ONLY with a compact JSON array of ${included.length} objects, one per image, in the same order: [{"index": 0, "relevant": boolean, "category": "one of the categories above", "confidence": number between 0 and 1, "note": "short reason in Russian", "caption": "1-2 sentence summary in Russian of what is actually shown in the photo (building, place, activity), no speculation"}, ...].
 Be conservative: if you cannot confirm the location/institution from an image, or it's a generic photo of a similar building, stock photography, or unrelated content, set relevant=false or a low confidence (<0.4). Only give confidence above 0.7 when there is a clear visual/textual cue (signage, distinctive architecture you recognize, caption match).`;
 
   try {
@@ -135,6 +136,7 @@ Be conservative: if you cannot confirm the location/institution from an image, o
         category,
         confidence: clamp01(result.confidence),
         verificationNote: result.note ?? "",
+        caption: result.caption?.trim() || undefined,
       };
     }
     return output;
@@ -180,7 +182,8 @@ export async function generateDescription(
   universityName: string,
   city: string | null,
   wikiSummary: string | null,
-  officialSiteSummary: string | null
+  officialSiteSummary: string | null,
+  socialHandles: string[] = []
 ): Promise<string> {
   const apiKey = requireApiKey();
   const model = process.env.GEMINI_TEXT_MODEL || DEFAULT_MODEL;
@@ -197,7 +200,11 @@ export async function generateDescription(
 ${wikiSummary ?? "нет данных"}
 
 Источник 2 (официальный сайт университета):
-${officialSiteSummary ?? "нет данных"}`;
+${officialSiteSummary ?? "нет данных"}${
+    socialHandles.length
+      ? `\n\nОфициальные аккаунты в соцсетях (известен только факт их наличия, содержимое не известно): ${socialHandles.join(", ")}`
+      : ""
+  }`;
 
   try {
     const res = await fetch(

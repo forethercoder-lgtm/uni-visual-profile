@@ -1,20 +1,20 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { Inter, Playfair_Display } from "next/font/google";
 import "./globals.css";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
+const body = Inter({
+  variable: "--font-body",
+  subsets: ["latin", "cyrillic"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
+const heading = Playfair_Display({
+  variable: "--font-heading",
+  subsets: ["latin", "cyrillic"],
 });
 
-const TITLE = "Campus Vision — визуальный профиль университета";
+const TITLE = "Campus Vision — визуальный профиль университета и колледжа";
 const DESCRIPTION =
-  "AI-сервис: по названию университета формирует проверенный визуальный профиль кампуса за секунды.";
+  "AI-сервис: по названию университета или колледжа формирует проверенный визуальный профиль кампуса за секунды.";
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://uni-visual-profile.vercel.app"),
@@ -38,14 +38,9 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html
       lang="ru"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      className={`${body.variable} ${heading.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col">
-        <div className="aurora-bg" aria-hidden="true">
-          <div className="aurora-blob one" />
-          <div className="aurora-blob two" />
-          <div className="aurora-blob three" />
-        </div>
         {children}
       </body>
     </html>

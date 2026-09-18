@@ -55,6 +55,26 @@ export function fetchableUrl(candidate: ImageCandidate): string {
 export interface VerifiedImage extends ImageCandidate {
   confidence: number;
   verificationNote: string;
+  // Short "what is in this photo" summary shown under the picture.
+  caption?: string;
+}
+
+export type SocialPlatform =
+  | "instagram"
+  | "tiktok"
+  | "youtube"
+  | "facebook"
+  | "telegram"
+  | "vk"
+  | "x"
+  | "linkedin";
+
+export interface SocialLink {
+  platform: SocialPlatform;
+  url: string;
+  handle: string | null;
+  summary: string | null;
+  source: "official_site" | "wikidata";
 }
 
 export interface UniversityProfile {
@@ -62,6 +82,9 @@ export interface UniversityProfile {
   resolvedName: string;
   city: string | null;
   country: string | null;
+  website: string | null;
+  wikiUrl: string | null;
+  socials: SocialLink[];
   description: string;
   categories: Partial<Record<Category, VerifiedImage[]>>;
   warnings: string[];

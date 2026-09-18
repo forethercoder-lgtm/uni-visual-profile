@@ -3,7 +3,8 @@ import { resolveUniversity } from "@/lib/resolveUniversity";
 import { searchAllCategories } from "@/lib/imageSearch";
 import { dedupeCandidates } from "@/lib/dedup";
 import { verifyBatch, generateDescription } from "@/lib/gemini";
-import { fetchOfficialSiteSummary } from "@/lib/officialSite";
+import { fetchOfficialSiteSummary, fetchOfficialSiteSocials } from "@/lib/officialSite";
+import { mergeSocials } from "@/lib/socials";
 import { filterContentCandidates } from "@/lib/contentFilters";
 import { getCached, setCached } from "@/lib/cache";
 import { Category, ImageCandidate, UniversityProfile, VerifiedImage } from "@/lib/types";
@@ -88,6 +89,12 @@ export async function GET(req: NextRequest) {
       ? fetchOfficialSiteSummary(resolved.officialWebsite)
       : Promise.resolve(null);
 
+    const socialsPromise = (
+      resolved.officialWebsite
+        ? fetchOfficialSiteSocials(resolved.officialWebsite)
+        : Promise.resolve([])
+    ).then((fromSite) => mergeSocials(fromSite, resolved.socials));
+
     const rawCandidates = filterContentCandidates(
       await searchAllCategories(
         resolved.resolvedName,
@@ -103,12 +110,16 @@ export async function GET(req: NextRequest) {
       warnings.push("Изображения не найдены. Проверьте название университета.");
     }
 
-    const descriptionPromise = officialSiteSummaryPromise.then((officialSiteSummary) =>
+    const descriptionPromise = Promise.all([
+      officialSiteSummaryPromise,
+      socialsPromise,
+    ]).then(([officialSiteSummary, socials]) =>
       generateDescription(
         resolved.resolvedName,
         resolved.city,
         resolved.wikiSummary,
-        officialSiteSummary
+        officialSiteSummary,
+        socials.map((s) => `${s.platform} ${s.handle ?? ""}`.trim())
       )
     );
 
@@ -157,6 +168,9 @@ export async function GET(req: NextRequest) {
       resolvedName: resolved.resolvedName,
       city: resolved.city,
       country: resolved.country,
+      website: resolved.officialWebsite,
+      wikiUrl: resolved.wikiUrl,
+      socials: await socialsPromise,
       description,
       categories,
       warnings,
