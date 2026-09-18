@@ -3,6 +3,21 @@
 import { useState } from "react";
 import { CATEGORY_LABELS, Category, UniversityProfile } from "@/lib/types";
 
+function getSourceLabel(sourcePage: string): string {
+  try {
+    const host = new URL(sourcePage).hostname.replace(/^www\./, "");
+    if (host.includes("wikimedia")) return "Wikimedia Commons";
+    return host;
+  } catch {
+    return "источник";
+  }
+}
+
+function formatDate(date?: string): string | null {
+  if (!date) return null;
+  return date.match(/^\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
+}
+
 const FILTERS: Category[] = [
   "campus",
   "dorms",
@@ -296,39 +311,61 @@ export default function Home() {
                 {CATEGORY_LABELS[cat]}
               </h3>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                {profile.categories[cat]?.map((img, i) => (
-                  <a
-                    key={i}
-                    href={img.sourcePage}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="group block rounded-xl overflow-hidden glass hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300"
-                  >
-                    <div className="relative aspect-video bg-white/5 overflow-hidden">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={img.thumbnailUrl || img.url}
-                        alt={img.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                      />
-                      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                      <span
-                        className={`absolute top-2 right-2 text-[11px] px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm ${
-                          img.confidence >= 0.7
-                            ? "bg-emerald-500/80 text-white"
-                            : img.confidence >= 0.4
-                            ? "bg-amber-500/80 text-white"
-                            : "bg-gray-500/80 text-white"
-                        }`}
+                {profile.categories[cat]?.map((img, i) => {
+                  const date = formatDate(img.contextDate);
+                  const source = getSourceLabel(img.sourcePage);
+                  return (
+                    <div
+                      key={i}
+                      className="group rounded-xl overflow-hidden glass hover:-translate-y-1 hover:shadow-xl hover:shadow-indigo-500/10 transition-all duration-300 flex flex-col"
+                    >
+                      <a
+                        href={img.sourcePage}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="relative aspect-video bg-white/5 overflow-hidden block"
                       >
-                        {Math.round(img.confidence * 100)}%
-                      </span>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={img.thumbnailUrl || img.url}
+                          alt={img.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <span
+                          className={`absolute top-2 right-2 text-[11px] px-2 py-0.5 rounded-full font-semibold backdrop-blur-sm ${
+                            img.confidence >= 0.7
+                              ? "bg-emerald-500/80 text-white"
+                              : img.confidence >= 0.4
+                              ? "bg-amber-500/80 text-white"
+                              : "bg-gray-500/80 text-white"
+                          }`}
+                        >
+                          {Math.round(img.confidence * 100)}%
+                        </span>
+                      </a>
+                      <div className="p-2.5 flex flex-col gap-1.5">
+                        <p className="text-xs text-white/70 leading-snug line-clamp-2">
+                          {img.verificationNote || img.title}
+                        </p>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-white/40 truncate">
+                            {source}
+                            {date ? ` · ${date}` : ""}
+                          </span>
+                          <a
+                            href={img.sourcePage}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="shrink-0 text-[10px] font-medium text-indigo-300 hover:text-indigo-200 transition-colors"
+                          >
+                            Источник →
+                          </a>
+                        </div>
+                      </div>
                     </div>
-                    <div className="p-2.5 text-xs text-white/50 truncate group-hover:text-white/80 transition-colors">
-                      {img.verificationNote || img.title}
-                    </div>
-                  </a>
-                ))}
+                  );
+                })}
               </div>
             </section>
           ))}

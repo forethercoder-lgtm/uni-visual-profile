@@ -3,6 +3,7 @@ import { resolveUniversity } from "@/lib/resolveUniversity";
 import { searchAllCategories } from "@/lib/imageSearch";
 import { dedupeCandidates } from "@/lib/dedup";
 import { verifyBatch, generateDescription } from "@/lib/gemini";
+import { fetchOfficialSiteSummary } from "@/lib/officialSite";
 import { filterContentCandidates } from "@/lib/contentFilters";
 import { getCached, setCached } from "@/lib/cache";
 import { Category, ImageCandidate, UniversityProfile, VerifiedImage } from "@/lib/types";
@@ -83,9 +84,9 @@ export async function GET(req: NextRequest) {
         `Запрос неоднозначен, использован наиболее вероятный вариант: "${resolved.resolvedName}". Другие варианты: ${resolved.candidates.slice(1, 4).join(", ")}.`
       );
     }
-    if (!resolved.wikiSummary) {
-      warnings.push("Не удалось найти проверенное текстовое описание университета.");
-    }
+    const officialSiteSummaryPromise = resolved.officialWebsite
+      ? fetchOfficialSiteSummary(resolved.officialWebsite)
+      : Promise.resolve(null);
 
     const rawCandidates = filterContentCandidates(
       await searchAllCategories(
@@ -102,10 +103,13 @@ export async function GET(req: NextRequest) {
       warnings.push("Изображения не найдены. Проверьте название университета.");
     }
 
-    const descriptionPromise = generateDescription(
-      resolved.resolvedName,
-      resolved.city,
-      resolved.wikiSummary
+    const descriptionPromise = officialSiteSummaryPromise.then((officialSiteSummary) =>
+      generateDescription(
+        resolved.resolvedName,
+        resolved.city,
+        resolved.wikiSummary,
+        officialSiteSummary
+      )
     );
 
     const deduped = await dedupeCandidates(rawCandidates);
@@ -144,6 +148,9 @@ export async function GET(req: NextRequest) {
     }
 
     const description = await descriptionPromise;
+    if (!resolved.wikiSummary && !(await officialSiteSummaryPromise)) {
+      warnings.push("Не удалось найти проверенное текстовое описание университета.");
+    }
 
     const profile: UniversityProfile = {
       query: q,

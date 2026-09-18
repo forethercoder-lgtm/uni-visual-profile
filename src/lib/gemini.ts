@@ -179,17 +179,25 @@ export async function verifyBatch(
 export async function generateDescription(
   universityName: string,
   city: string | null,
-  wikiSummary: string | null
+  wikiSummary: string | null,
+  officialSiteSummary: string | null
 ): Promise<string> {
   const apiKey = requireApiKey();
   const model = process.env.GEMINI_TEXT_MODEL || DEFAULT_MODEL;
+  const fallback = wikiSummary ?? officialSiteSummary ?? "Описание недоступно.";
 
+  // Wikipedia has no article for most of the world's universities, so the
+  // official site's own meta description is treated as an equally valid
+  // independent source — not a fallback of last resort.
   const prompt = `Напиши краткое (3-4 предложения) описание университета "${universityName}"${
     city ? ` в городе ${city}` : ""
-  } на русском языке для абитуриента. Используй только факты из источника ниже, ничего не выдумывай. Если данных мало — честно скажи, что информации недостаточно, не приукрашивай.
+  } на русском языке для абитуриента. Используй только факты из источников ниже (можно использовать оба, если они не противоречат друг другу), ничего не выдумывай. Если источников мало или их нет — честно скажи, что информации недостаточно, не приукрашивай.
 
-Источник (Wikipedia):
-${wikiSummary ?? "нет данных"}`;
+Источник 1 (Wikipedia):
+${wikiSummary ?? "нет данных"}
+
+Источник 2 (официальный сайт университета):
+${officialSiteSummary ?? "нет данных"}`;
 
   try {
     const res = await fetch(
@@ -204,13 +212,13 @@ ${wikiSummary ?? "нет данных"}`;
         }),
       }
     );
-    if (!res.ok) return wikiSummary ?? "Описание недоступно.";
+    if (!res.ok) return fallback;
     const json = await res.json();
     const text: string =
       json.candidates?.[0]?.content?.parts?.[0]?.text ?? "";
-    return text.trim() || wikiSummary || "Описание недоступно.";
+    return text.trim() || fallback;
   } catch {
-    return wikiSummary ?? "Описание недоступно.";
+    return fallback;
   }
 }
 

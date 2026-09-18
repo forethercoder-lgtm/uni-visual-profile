@@ -79,3 +79,50 @@ export async function searchOfficialSite(
     return [];
   }
 }
+
+const META_DESC_RE = [
+  /<meta\s+name=["']description["']\s+content=["']([^"']*)["']/i,
+  /<meta\s+content=["']([^"']*)["']\s+name=["']description["']/i,
+  /<meta\s+property=["']og:description["']\s+content=["']([^"']*)["']/i,
+  /<meta\s+content=["']([^"']*)["']\s+property=["']og:description["']/i,
+];
+
+const HTML_ENTITIES: Record<string, string> = {
+  amp: "&", quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ",
+};
+
+function decodeHtmlEntities(text: string): string {
+  return text
+    .replace(/&#(\d+);/g, (_, code) => String.fromCharCode(Number(code)))
+    .replace(/&(amp|quot|apos|lt|gt|nbsp);/g, (_, name) => HTML_ENTITIES[name]);
+}
+
+// Wikipedia doesn't have an article for most of the ~25,000 universities
+// worldwide, but almost every one has a homepage with a meta description —
+// a second, independent factual source for the campus summary instead of
+// relying on Wikipedia alone.
+export async function fetchOfficialSiteSummary(
+  websiteUrl: string
+): Promise<string | null> {
+  try {
+    const res = await fetch(websiteUrl, {
+      headers: { "User-Agent": USER_AGENT },
+      signal: AbortSignal.timeout(6000),
+      redirect: "follow",
+    });
+    if (!res.ok) return null;
+    const contentType = res.headers.get("content-type") || "";
+    if (!contentType.includes("html")) return null;
+
+    const html = await res.text();
+    for (const re of META_DESC_RE) {
+      const match = html.match(re)?.[1];
+      if (match && match.trim().length > 20) {
+        return decodeHtmlEntities(match.trim()).slice(0, 600);
+      }
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
